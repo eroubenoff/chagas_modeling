@@ -7,3 +7,5 @@
 ./microdata_documentation/*
 ./microdata_download/*
 ./population_tcu/*
+*.Rproj
+nohup.out

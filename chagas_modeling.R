@@ -358,9 +358,8 @@ if(FALSE) {
 # Spatial model only with offset
 # https://mc-stan.org/users/documentation/case-studies/icar_stan.html
 # https://github.com/stan-dev/example-models/blob/master/knitr/car-iar-poisson/bym2_offset_only.stan
-
-download.file("https://raw.githubusercontent.com/stan-dev/example-models/master/knitr/car-iar-poisson/nb_data_funs.R",
-              destfile= "nb_data_funs.R")
+# download.file("https://raw.githubusercontent.com/stan-dev/example-models/master/knitr/car-iar-poisson/nb_data_funs.R",
+#               destfile= "nb_data_funs.R")
 source("nb_data_funs.R")
 
 
