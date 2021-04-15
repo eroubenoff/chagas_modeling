@@ -10,3 +10,5 @@
 ./population_tcu/*
 *.Rproj
 nohup.out
+chagas_data.Rdata
+mcmc_out/
