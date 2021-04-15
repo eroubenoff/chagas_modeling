@@ -1,0 +1,9 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+./mcmc_out/*
+./chagas_data/from_tabnet/*
+./microdata_documentation/*
+./microdata_download/*
+./population_tcu/*
