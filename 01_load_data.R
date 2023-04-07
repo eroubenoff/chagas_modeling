@@ -11,6 +11,10 @@ library(sf)
 library(rstan)
 library(StanHeaders)
 library(reshape2)
+if (!require("devtools")) {
+  install.packages("devtools")
+}
+devtools::install_github("stan-dev/bayesplot")
 library(bayesplot)
 library(coda)
 
@@ -19,7 +23,7 @@ library(coda)
 #### Load Data ####
 #-------------------------------------------------------------------------------
 
-setwd("~/90days/eroubenoff/chagas")
+# setwd("~/90days/eroubenoff/chagas")
 load("./chagas_data/chagas_municipio.Rdata")
 br_shp <- st_read("./from_ayesha/municipios_2010.shp", "municipios_2010")
 load("./from_ayesha/cleaned_data/pop_all.Rdata")

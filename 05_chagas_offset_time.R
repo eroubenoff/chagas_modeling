@@ -1,7 +1,7 @@
 #-------------------------------------------------------------------------------
 #### 04_chagas_offset.R ####
-# Spatial offset model (non-covariate)
-# Assumes a file "04_chagas_offset.stan" with the model code
+# Spatial offset model (non-covariate), with time
+# Assumes a file "05_chagas_offset_time.stan" with the model code
 # Spatial model only with offset
 # https://mc-stan.org/users/documentation/case-studies/icar_stan.html
 # https://github.com/stan-dev/example-models/blob/master/knitr/car-iar-poisson/bym2_offset_only.stan
@@ -17,6 +17,10 @@ library(StanHeaders)
 library(reshape2)
 library(bayesplot)
 library(coda)
+# we recommend running this is a fresh R session or restarting your current session
+# install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+library(cmdstanr)
+# install_cmdstan(cores = 4)
 
 start_time <- Sys.time()
 
@@ -28,7 +32,7 @@ source("nb_data_funs.R")
 br_shp <- br_shp %>% arrange(muni_code)
 
 chagas_offset_count <- chagas_arr %>%
-  group_by(municipio) %>%
+  group_by(year, municipio) %>%
   summarize(count = sum(count))
 
 # Need to create a crosswalk of municipalitity to index
@@ -36,43 +40,54 @@ chagas_offset_count <- chagas_arr %>%
 # shapefile (does not have to be the reverse)
 
 if (!all(
-    (chagas_offset_count  %>% pull(municipio))
-      %in%
-    (br_shp %>% st_drop_geometry() %>% pull(muni_code)) 
+  (chagas_offset_count  %>% pull(municipio))
+  %in%
+  (br_shp %>% st_drop_geometry() %>% pull(muni_code)) 
 ) ) {
-  stop("Not all municipalities found in shapefile")
+  stop("Not all municipalities in chagas_df found in shapefile")
 }
 
-chagas_df <- left_join(
-  br_shp %>% dplyr::select(nome, uf, estado_id, muni_code),
-  chagas_offset_count,
-  by = c("muni_code" = "municipio")
-)
-  
-# Join with pop_data
-pop <- pop.all %>% group_by(code) %>%
-  summarize(pop = round(mean(ps)))
+if (!all(
+  (br_shp %>% st_drop_geometry() %>% pull(muni_code)) 
+  %in%
+  (chagas_offset_count  %>% pull(municipio))
+) ) {
+  stop("Not all municipalities shapefile found in chagas_df")
+}
 
-chagas_df <- chagas_df %>%
-  left_join(pop,
-            by=c("muni_code" = "code"))  %>%
-  mutate(id = 1:nrow(.))
+# There are 3 islands. Need to drop them from the adjacency structure.
+br_nb <- spdep::poly2nb(br_shp)
+# Get them by muni_id to drop from both dfs
+to_drop <- br_shp %>% slice(1524, 3498, 5564) %>% pull(muni_code)
+chagas_offset_count <- chagas_offset_count %>% filter(!municipio %in% to_drop)
+br_shp <- br_shp %>%filter(!muni_code %in% to_drop)
 
-# Check to make sure there are no NAs in the columns we need
-which(is.na(chagas_df$pop))
-which(is.na(chagas_df$count))
-# There are a few missing pop... drop them for now
-chagas_df <- chagas_df %>% drop_na(pop, count)
 
-# qtm(chagas_df, fill = "pop")
-# qtm(chagas_df, fill = "count")
-# hist(chagas_df$count)
+
+# Rectangularize both the pop and chagas counts 
+# First make sure both datasets are in the same order
+chagas_offset_count <- chagas_offset_count %>% 
+  arrange(match(municipio, br_shp$muni_code))
+
+chagas_offset_count <- chagas_offset_count %>% 
+  acast(year ~ municipio, value.var = "count") 
+
+chagas_pop <- br_shp %>%
+  st_drop_geometry() %>%
+  select(muni_code, populacao) %>% 
+  slice(rep(1:n(), each = 19)) %>%
+  group_by(muni_code) %>%
+  mutate(year = dimnames(chagas_offset_count)[[1]])  %>%
+  ungroup()
+
+
+chagas_pop <- chagas_pop %>% 
+  mutate(populacao = round(as.numeric(populacao))) %>%
+  acast(year ~ muni_code, value.var = "populacao") 
 
 
 # Pull the adjacencies
-br_nb <- spdep::poly2nb(chagas_df)
-# There are three islands-- drop them 
-br_nb <- spdep::poly2nb(chagas_df %>% slice(-c(1521, 3490, 5507)))
+br_nb <- spdep::poly2nb(br_shp)
 nbs  <- nb2graph(br_nb)
 N = nbs$N;
 node1 = nbs$node1;
@@ -83,11 +98,12 @@ scaling_factor = scale_nb_components(br_nb)[1];
 
 stan_data <- list(
   N = N,
+  T = 19,
   N_edges = N_edges,
   node1 = node1,
   node2 = node2,
-  y = chagas_df$count,
-  E = chagas_df$pop,
+  y = chagas_offset_count,
+  E = chagas_pop,
   scaling_factor = scaling_factor
 )
 
@@ -98,17 +114,16 @@ stan_data <- list(
 #     lambda = runif(1, 0, 10)
 #   )
 # }
+chagas_offset <- cmdstan_model("05_chagas_offset_time.stan",
+              cpp_options = list(stan_opencl = TRUE))
 
-
-chagas_offset <- stan("04_chagas_offset.stan",
-                      model_name = "chagas_offset", 
-                      data = stan_data, 
+chagas_offset$sample(data = stan_data, 
                       # control = list(adapt_delta = 0.99, max_treedepth=20),
-                      pars = c("psi"),
+                      # pars = c("psi"),
                       chains=4, 
-                      cores = 4,
-                      warmup=1000, 
-                      iter=2000, 
+                      parallel_chains=4, 
+                      iter_warmup=1000, 
+                      iter_sampling=2000, 
                       save_warmup=FALSE)
 
 

@@ -4,8 +4,10 @@
 library(tidyverse)
 library(read.dbc)
 library(tabulizer)
+library(sf)
+library(tmap)
 rm(list = ls())
-setwd("/nobackup/90days/eroubenoff/chagas/chagas_data")
+setwd("chagas_modeling/chagas_data")
 
 l <- list.files("from_tabnet", full.names = TRUE)
 chagas_tabnet <- map_dfr(l, ~{
@@ -60,6 +62,17 @@ chagas_monthly <- chagas_tabnet %>%
   select(-`Município de residência`, -Total, -level, -`Ign/Em Branco`, -`UF de residência`) 
 
 colnames(chagas_monthly) <- c(as.character(1:12), "year")
+
+chagas_monthly <- chagas_monthly %>%
+  group_by(year) %>% 
+  summarize_all(~sum(., na.rm = TRUE))
+
+chagas_monthly <- chagas_monthly %>% pivot_longer(-year, names_to = "month")
+
+ggplot(chagas_monthly) +
+  geom_line(aes(x=month, y = value, group = year)) + 
+  stat_smooth(aes(x = month, y = value))
+
 
 chagas_monthly <- chagas_monthly %>%
   select(-year) %>%

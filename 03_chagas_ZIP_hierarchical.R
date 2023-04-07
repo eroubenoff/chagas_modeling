@@ -12,6 +12,7 @@ library(StanHeaders)
 library(reshape2)
 library(bayesplot)
 library(coda)
+library(tmap)
 
 start_time <- Sys.time()
 
@@ -71,7 +72,7 @@ mcmc_areas(posterior,
            pars = c("lambda[1]"),
            prob = 0.8)
 mcmc_areas(posterior,
-           pars = c("theta"),
+           pars = c("theta[1]"),
            prob = 0.8)
 
 library(geobr)
@@ -79,7 +80,7 @@ library(geobr)
 uf_shp <- geobr::read_state()
 
 posterior_shp <- chagas_arr %>% 
-  select(uf, uf_no) %>% 
+  dplyr::select(uf, uf_no) %>% 
   distinct() %>%
   left_join(posterior_df) %>%
   left_join(br_shp, .)
