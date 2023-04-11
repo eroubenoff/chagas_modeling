@@ -9,7 +9,7 @@
 #               destfile= "nb_data_funs.R")
 #-------------------------------------------------------------------------------
 
-setwd("~/chagas_modeling")
+setwd("~/Github/chagas_modeling")
 library(tidyverse)
 library(sf)
 library(rstan)
@@ -21,6 +21,7 @@ library(coda)
 # install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
 library(cmdstanr)
 # install_cmdstan(cores = 4)
+set_cmdstan_path(path="G:/Documents/.cmdstan/cmdstan-2.31.0")
 
 start_time <- Sys.time()
 
@@ -28,6 +29,21 @@ load("chagas_data.Rdata")
 load("./from_ayesha/cleaned_data/pop_all.Rdata")
 source("nb_data_funs.R")
 
+# For testing purposes only:
+# The state with the highest count is:
+testing <- TRUE
+if (testing){
+  chagas_arr %>% 
+    group_by(uf) %>%
+    summarize(count = sum(count)) %>%
+    arrange(count)
+  
+  chagas_arr <- chagas_arr %>%
+    filter(uf == "PA") ## PA is highest, RR is lowest
+  
+  br_shp <- br_shp %>% filter(uf == "PA")
+  
+}
 
 br_shp <- br_shp %>% arrange(muni_code)
 
@@ -55,12 +71,14 @@ if (!all(
   stop("Not all municipalities shapefile found in chagas_df")
 }
 
-# There are 3 islands. Need to drop them from the adjacency structure.
-br_nb <- spdep::poly2nb(br_shp)
-# Get them by muni_id to drop from both dfs
-to_drop <- br_shp %>% slice(1524, 3498, 5564) %>% pull(muni_code)
-chagas_offset_count <- chagas_offset_count %>% filter(!municipio %in% to_drop)
-br_shp <- br_shp %>%filter(!muni_code %in% to_drop)
+if (!testing){
+  # There are 3 islands. Need to drop them from the adjacency structure.
+  br_nb <- spdep::poly2nb(br_shp)
+  # Get them by muni_id to drop from both dfs
+  to_drop <- br_shp %>% slice(1524, 3498, 5564) %>% pull(muni_code)
+  chagas_offset_count <- chagas_offset_count %>% filter(!municipio %in% to_drop)
+  br_shp <- br_shp %>%filter(!muni_code %in% to_drop)
+}
 
 
 
@@ -98,39 +116,82 @@ scaling_factor = scale_nb_components(br_nb)[1];
 
 stan_data <- list(
   N = N,
-  T = 19,
+  T = 2, #19,
   N_edges = N_edges,
   node1 = node1,
   node2 = node2,
-  y = chagas_offset_count,
-  E = chagas_pop,
+  y = chagas_offset_count[1:2, ],# chagas_offset_count,
+  E = chagas_pop[1:2,], #chagas_pop,
   scaling_factor = scaling_factor
 )
 
-# stan_inits <- function() {
-#   list(
-#     p = runif(1, 0, 1),
-#     l = runif(1, 0, 10),
-#     lambda = runif(1, 0, 10)
-#   )
-# }
+ 
+Sys.setenv(STAN_OPENCL=TRUE)
+path_to_opencl_lib <- "G:/CUDA Development/lib/x64"
+cpp_options = list(
+  paste0("LDFLAGS+= -L\"",path_to_opencl_lib,"\" -lOpenCL")
+)
+
+cmdstanr::cmdstan_make_local(cpp_options = cpp_options)
+cmdstanr::rebuild_cmdstan()
+
 chagas_offset <- cmdstan_model("05_chagas_offset_time.stan",
+                               # force_recompile = TRUE,
               cpp_options = list(stan_opencl = TRUE))
 
-chagas_offset$sample(data = stan_data, 
+chagas_sample <- chagas_offset$sample(data = stan_data, 
                       # control = list(adapt_delta = 0.99, max_treedepth=20),
                       # pars = c("psi"),
                       chains=4, 
-                      parallel_chains=4, 
-                      iter_warmup=1000, 
-                      iter_sampling=2000, 
+                      parallel_chains=4,
+                      iter_warmup=ifelse(testing, 500, 1000), 
+                      iter_sampling=ifelse(testing,500, 2000), 
+                      opencl_ids = c(0, 0),
+                      output_dir = "mcmc_out",
                       save_warmup=FALSE)
 
+chagas_sample$profiles()
 
+chagas_sample$save_output_files("mcmc_out/")
+chagas_summary <- chagas_sample$summary()
+# Check convergence
+ggplot() + geom_histogram(aes(chagas_summary$rhat)) + geom_vline(aes(xintercept = 1.01))
+mean(chagas_summary$ess_bulk)
+sd(chagas_summary$ess_bulk)
+chagas_summary %>% filter(str_detect(variable, "psi"))
 
-save(chagas_offset, file = "mcmc_out/chagas_offset.Rdata")
+chagas_sample$save_object(file="mcmc_out/chagas_offset.RDS")
+#save(chagas_sample, file = "mcmc_out/chagas_offset.Rdata")
 end_time <- Sys.time()
 
+
+# Test mapping
+psi <- chagas_summary %>%
+  filter(str_detect(variable, "psi")) %>% 
+  # split variable indices into columns
+  separate(variable, into=c("variable", "t", "muni", NA), sep = "\\[|,|\\]")
+
+psi <- psi %>%
+  select(variable, t, muni, median) %>%
+  pivot_wider(id_cols = c("variable","muni"), names_from = "t", names_prefix = "year", values_from = "median")
+
+psi <- bind_cols(br_shp, psi)
+psi <- psi %>%
+  mutate(year1 = exp(year1), year2 = exp(year2))
+
+# Compare the smoothed rates with the MLE estiamtes
+count <- as.data.frame(t(chagas_offset_count[1:2, ])) 
+colnames(count) = c("MLE_y1","MLE_y2")
+  
+psi <- bind_cols(psi, count)
+
+psi <- psi %>%
+  mutate(populacao = as.numeric(populacao)) %>%
+  mutate(MLE_y1 = MLE_y1/populacao,
+         MLE_y2 = MLE_y2/populacao)
+
+library(tmap)
+tm_shape(psi) + tm_polygons(col = "year2")
 
 message("Model began at ", start_time, " and ended at ", end_time,
         "\nTotal run time is: ", end_time - start_time)
