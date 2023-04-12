@@ -51,6 +51,12 @@ chagas_offset_count <- chagas_arr %>%
   group_by(year, municipio) %>%
   summarize(count = sum(count))
 
+if (testing) {
+  # Limit to first 5 years
+  chagas_offset_count <- chagas_offset_count %>%
+    filter(year %in% 2001:2002)
+}
+
 # Need to create a crosswalk of municipalitity to index
 # First, confirm that all munis in the chagas DF are in the 
 # shapefile (does not have to be the reverse)
@@ -93,7 +99,7 @@ chagas_offset_count <- chagas_offset_count %>%
 chagas_pop <- br_shp %>%
   st_drop_geometry() %>%
   select(muni_code, populacao) %>% 
-  slice(rep(1:n(), each = 19)) %>%
+  slice(rep(1:n(), each = nrow(chagas_offset_count))) %>%
   group_by(muni_code) %>%
   mutate(year = dimnames(chagas_offset_count)[[1]])  %>%
   ungroup()
@@ -163,7 +169,7 @@ chagas_offset_count[2, nonzeros[2, 1:max_nonzeros[2]]]
 
 stan_data <- list(
   N = N,
-  T = 19,
+  T = nrow(chagas_offset_count),
   N_edges = N_edges,
   node1 = node1,
   node2 = node2,
@@ -178,23 +184,26 @@ stan_data <- list(
 
  
 Sys.setenv(STAN_OPENCL=TRUE)
-path_to_opencl_lib <- "G:/CUDA Development/lib/x64"
-cpp_options = list(
-  paste0("LDFLAGS+= -L\"",path_to_opencl_lib,"\" -lOpenCL")
-)
-
-cmdstanr::cmdstan_make_local(cpp_options = cpp_options)
-cmdstanr::rebuild_cmdstan()
+# Need to run the following at least once to make sure STAN can use the 
+# graphics card
+# 
+# path_to_opencl_lib <- "G:/CUDA Development/lib/x64"
+# cpp_options = list(
+#   paste0("LDFLAGS+= -L\"",path_to_opencl_lib,"\" -lOpenCL")
+# )
+# cmdstanr::cmdstan_make_local(cpp_options = cpp_options)
+# cmdstanr::rebuild_cmdstan()
 
 chagas_offset <- cmdstan_model("05_chagas_offset_time.stan",
-                               # force_recompile = TRUE,
+                               force_recompile = TRUE,
               cpp_options = list(stan_opencl = TRUE))
 
+message("Sampling began at", Sys.time())
 chagas_sample <- chagas_offset$sample(data = stan_data, 
                       # control = list(adapt_delta = 0.99, max_treedepth=20),
                       # pars = c("psi"),
-                      chains=4, 
-                      parallel_chains=4,
+                      chains=ifelse(testing, 1, 4), 
+                      parallel_chains=ifelse(testing, 1, 4),
                       iter_warmup=ifelse(testing, 100, 1000), 
                       iter_sampling=ifelse(testing,100, 1000), 
                       opencl_ids = c(0, 0),
@@ -205,6 +214,7 @@ chagas_sample$profiles()
 
 chagas_sample$save_output_files("mcmc_out/")
 chagas_summary <- chagas_sample$summary()
+chagas_summary
 # Check convergence
 ggplot() + geom_histogram(aes(chagas_summary$rhat)) + geom_vline(aes(xintercept = 1.01))
 mean(chagas_summary$ess_bulk)
@@ -230,24 +240,21 @@ psi <- bind_cols(br_shp, psi)
 psi
 
 # Compare the smoothed rates with the MLE estiamtes
-count <- as.data.frame(t(chagas_offset_count[1:5, ])) 
-colnames(count) = c("MLE_y1","MLE_y2", "MLE_y3", "MLE_y4", "MLE_y5")
+count <- as.data.frame(t(chagas_offset_count[1:2, ])) 
+colnames(count) = c("MLE_y1","MLE_y2")
   
 psi <- bind_cols(psi, count)
 
 psi <- psi %>%
   mutate(populacao = as.numeric(populacao)) %>%
   mutate(MLE_y1 = MLE_y1/populacao,
-         MLE_y2 = MLE_y2/populacao,
-         MLE_y3 = MLE_y3/populacao,
-         MLE_y4 = MLE_y4/populacao,
-         MLE_y5 = MLE_y5/populacao)
+         MLE_y2 = MLE_y2/populacao)
 
 library(tmap)
 tmap_mode("view")
 tmap_arrange(
-  tm_shape(psi) + tm_polygons(col = "year1"),
-  tm_shape(psi) + tm_polygons(col = "MLE_y1")
+  tm_shape(psi) + tm_polygons(col = "year2", style = "cont"),
+  tm_shape(psi) + tm_polygons(col = "MLE_y2", style = "cont")
 )
 
 pi <- chagas_summary %>%
@@ -273,8 +280,8 @@ pi <- bind_cols(pi, count)
 
 tmap_arrange(
   
-tm_shape(pi) + tm_polygons(col = "year4"),
-tm_shape(pi) + tm_polygons(col = "MLE_y4")
+tm_shape(pi) + tm_polygons(col = "year2", style = "cont"),
+tm_shape(pi) + tm_polygons(col = "MLE_y2", style = "cont")
 )
 
 message("Model began at ", start_time, " and ended at ", end_time,
