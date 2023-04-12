@@ -31,7 +31,7 @@ source("nb_data_funs.R")
 
 # For testing purposes only:
 # The state with the highest count is:
-testing <- TRUE
+testing <-TRUE 
 if (testing){
   chagas_arr %>% 
     group_by(uf) %>%
@@ -114,15 +114,66 @@ N_edges = nbs$N_edges;
 scaling_factor = scale_nb_components(br_nb)[1];
 
 
+# Idea: split the data into zero and nonzero counts
+zeros <- unname(chagas_offset_count)
+max_zeros <- c()
+nonzeros <- unname(chagas_offset_count)
+max_nonzeros <- c()
+
+for (i in 1:nrow(zeros)) {
+  # Handle zeros
+  idx = which(zeros[i,] == 0, useNames=FALSE)
+  if(length(idx) < ncol(zeros)) {
+    num_zeros = ncol(zeros) - length(idx)
+    idx = c(idx, rep(-1, num_zeros))
+  } 
+  zeros[i,] = idx
+  max_zeros <- c(max_zeros, which.min(idx) -1)
+  
+  
+  # Handle nonzeros
+  idx =  which(nonzeros[i,] != 0, useNames=FALSE)
+  if(length(idx) < ncol(nonzeros)) {
+    num_nonzeros = ncol(nonzeros) - length(idx)
+    idx = c(idx, rep(-1, num_nonzeros))
+  } 
+  nonzeros[i,] = idx
+  max_nonzeros <- c(max_nonzeros, which.min(idx) -1)
+}
+
+# Test_zero and test_nonzero are 2d arrays containing the indices of 
+# zero and nonzero elements in the count array. They are paired
+# with an additional term, max_zero and max_nonzero, which indicates
+# how many zero and nonzero elements are in each. 
+zeros
+max_zeros
+nonzeros
+max_nonzeros
+
+# Then, the data can be accessed efficiently by year like:
+# Full data set
+chagas_offset_count[2, ] 
+# Indices that are equal to zero
+zeros[2, 2:max_zeros[2]]
+# Indices that are not equal to zero
+nonzeros[2, 2:max_nonzeros[2]]
+# Values of indices not equal to zero
+chagas_offset_count[2, nonzeros[2, 1:max_nonzeros[2]]]
+
+
 stan_data <- list(
   N = N,
-  T = 2, #19,
+  T = 19,
   N_edges = N_edges,
   node1 = node1,
   node2 = node2,
-  y = chagas_offset_count[1:2, ],# chagas_offset_count,
-  E = chagas_pop[1:2,], #chagas_pop,
-  scaling_factor = scaling_factor
+  y = chagas_offset_count, #[1:5, ],# chagas_offset_count,
+  E = chagas_pop, #[1:5,], #chagas_pop,
+  scaling_factor = scaling_factor,
+  zeros = zeros,
+  max_zeros = max_zeros,
+  nonzeros = nonzeros,
+  max_nonzeros = max_nonzeros
 )
 
  
@@ -144,8 +195,8 @@ chagas_sample <- chagas_offset$sample(data = stan_data,
                       # pars = c("psi"),
                       chains=4, 
                       parallel_chains=4,
-                      iter_warmup=ifelse(testing, 500, 1000), 
-                      iter_sampling=ifelse(testing,500, 2000), 
+                      iter_warmup=ifelse(testing, 100, 1000), 
+                      iter_sampling=ifelse(testing,100, 1000), 
                       opencl_ids = c(0, 0),
                       output_dir = "mcmc_out",
                       save_warmup=FALSE)
@@ -167,7 +218,7 @@ end_time <- Sys.time()
 
 # Test mapping
 psi <- chagas_summary %>%
-  filter(str_detect(variable, "psi")) %>% 
+  filter(str_detect(variable, "^psi\\[")) %>% 
   # split variable indices into columns
   separate(variable, into=c("variable", "t", "muni", NA), sep = "\\[|,|\\]")
 
@@ -176,69 +227,57 @@ psi <- psi %>%
   pivot_wider(id_cols = c("variable","muni"), names_from = "t", names_prefix = "year", values_from = "median")
 
 psi <- bind_cols(br_shp, psi)
-psi <- psi %>%
-  mutate(year1 = exp(year1), year2 = exp(year2))
+psi
 
 # Compare the smoothed rates with the MLE estiamtes
-count <- as.data.frame(t(chagas_offset_count[1:2, ])) 
-colnames(count) = c("MLE_y1","MLE_y2")
+count <- as.data.frame(t(chagas_offset_count[1:5, ])) 
+colnames(count) = c("MLE_y1","MLE_y2", "MLE_y3", "MLE_y4", "MLE_y5")
   
 psi <- bind_cols(psi, count)
 
 psi <- psi %>%
   mutate(populacao = as.numeric(populacao)) %>%
   mutate(MLE_y1 = MLE_y1/populacao,
-         MLE_y2 = MLE_y2/populacao)
+         MLE_y2 = MLE_y2/populacao,
+         MLE_y3 = MLE_y3/populacao,
+         MLE_y4 = MLE_y4/populacao,
+         MLE_y5 = MLE_y5/populacao)
 
 library(tmap)
-tm_shape(psi) + tm_polygons(col = "year2")
+tmap_mode("view")
+tmap_arrange(
+  tm_shape(psi) + tm_polygons(col = "year1"),
+  tm_shape(psi) + tm_polygons(col = "MLE_y1")
+)
+
+pi <- chagas_summary %>%
+  filter(str_detect(variable, "^pi\\[")) %>% 
+  # split variable indices into columns
+  separate(variable, into=c("variable", "t", "muni", NA), sep = "\\[|,|\\]")
+
+pi <- pi %>%
+  select(variable, t, muni, median) %>%
+  pivot_wider(id_cols = c("variable","muni"), names_from = "t", names_prefix = "year", values_from = "median")
+
+logit <- function(x) {
+  log(x/(1-x))
+}
+
+sigmoid <- function(x) {
+  1/(1+exp(x))
+}
+pi <- pi %>%
+  mutate(across(starts_with("year"), sigmoid))
+pi <- bind_cols(br_shp, pi)
+pi <- bind_cols(pi, count)
+
+tmap_arrange(
+  
+tm_shape(pi) + tm_polygons(col = "year4"),
+tm_shape(pi) + tm_polygons(col = "MLE_y4")
+)
 
 message("Model began at ", start_time, " and ended at ", end_time,
         "\nTotal run time is: ", end_time - start_time)
 
-load("mcmc_out/chagas_offset.Rdata")
-
-posterior <- mcmc(as.data.frame(chagas_offset))
-
-
-str(posterior)
-mcmc_areas(posterior, 
-           "psi[1]")
-
-# Extract means to shp
-chagas_df$posterior_means = colMeans(posterior)[1:5507]
-qtm(chagas_df, fill = "posterior_means")
-
-summary(posterior)
-# Plot lambdas against thetas
-posterior_df <- data.frame(
-  uf_no = 1:27
-)
-posterior_df$theta <- colMeans(posterior)[1:27]
-posterior_df$theta_var <- apply(posterior, 2, var)[1:27]
-posterior_df$lambda <- colMeans(posterior)[28:54]
-posterior_df$lambda_var <- apply(posterior, 2, var) [28:54]
-
-ggplot(posterior_df) + 
-  geom_point(aes(theta, lambda))
-
-mcmc_areas(posterior,
-           pars = c("lambda[1]"),
-           prob = 0.8)
-mcmc_areas(posterior,
-           pars = c("theta"),
-           prob = 0.8)
-
-library(geobr)
-
-uf_shp <- geobr::read_state()
-
-posterior_shp <- chagas_arr %>% 
-  select(uf, uf_no) %>% 
-  distinct() %>%
-  left_join(posterior_df) %>%
-  left_join(br_shp, .)
-
-qtm(posterior_shp, fill = "theta")
-qtm(posterior_shp, fill = "lambda")
 
