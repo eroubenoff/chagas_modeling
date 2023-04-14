@@ -1,6 +1,6 @@
 .Rproj.user
 .Rhistory
-.RData
+
 .Rdata
 .Ruserdata
 ./mcmc_out/*

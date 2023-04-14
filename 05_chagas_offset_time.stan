@@ -34,21 +34,18 @@ transformed data {
 }
 parameters {
   // Intercepts
-  vector[T] beta0; 
-  vector[T] alpha0;
-  
-  // Temporally AR variance 
-  real<lower=0.0001> sigma_delta;
+  real beta0; 
+  real alpha0;
   
   // Spatial (phi) and aspaital (theta) error terms
-  vector[N] phi_lambda[T];        
+  // vector[N] phi_lambda[T];        
   vector[N] phi_pi[T];        
   vector[N] theta_lambda[T];    
   vector[N] theta_pi[T];    
   real<lower=0> sigma_lambda;
   real<lower=0> sigma_pi;
   
-  real<lower=0, upper=1> rho_lambda;
+  // real<lower=0, upper=1> rho_lambda;
   real<lower=0, upper=1> rho_pi;
 }
 transformed parameters{
@@ -60,14 +57,14 @@ transformed parameters{
   
   for (t in 1:T) {
     // Poisson error
-    epsilon[t] = sigma_lambda *(sqrt(1 - rho_lambda) * theta_lambda[t] + sqrt(rho_lambda/scaling_factor) * phi_lambda[t]);
+    epsilon[t] = sigma_lambda * theta_lambda[t]; /*(sqrt(1 - rho_lambda) * theta_lambda[t] + sqrt(rho_lambda/scaling_factor) * phi_lambda[t]);*/
     // Bernoulli error
     eta[t] = sigma_pi * (sqrt(1 - rho_pi) * theta_pi[t] + sqrt(rho_pi/scaling_factor) * phi_pi[t]);
   }
   
   for (t in 1:T) {
-    lambda[t] = log_E[t] + beta0[t] + epsilon[t];
-    pi[t] = alpha0[t] + eta[t];
+    lambda[t] = log_E[t] + beta0 + epsilon[t];
+    pi[t] = alpha0 + eta[t];
   }
   
   
@@ -79,23 +76,11 @@ model {
   
   // AR Priors for intercepts
   // Year 1
-  beta0[1] ~ normal(-10, 10);//normal(0.0, 1.0);
-  alpha0[1] ~ normal(-5, 10);//normal(0.0, 1.0);
-  // Year 2
-  beta0[2] ~ normal(beta0[1], sigma_delta);
-  alpha0[2] ~ normal(beta0[1], sigma_delta);
-  // Subsequent years
-  for (t in 3:T) {
-    beta0[t] ~ normal(2 * beta0[t-1] - beta0[t-2], sigma_delta);
-    alpha0[t] ~ normal(2 * alpha0[t-1] - alpha0[t-2], sigma_delta);
-  }
-  
-  // Prior on sigma_delta
-  sigma_delta ~ std_normal();
-  
+  beta0 ~ normal(-10, 10);//normal(0.0, 1.0);
+  alpha0 ~ normal(-5, 10);//normal(0.0, 1.0);
   
   // Priors on rho and sigma
-  rho_lambda ~ uniform(0,1); 
+  //rho_lambda ~ uniform(0,1); 
   rho_pi ~ uniform(0,1); 
   
   sigma_lambda ~ std_normal(); 
@@ -103,7 +88,7 @@ model {
   
   for (t in 1:T){
     // Priors on spatial errors 
-    phi_lambda[t] ~ icar_normal(N, node1, node2);
+    //phi_lambda[t] ~ icar_normal(N, node1, node2);
     phi_pi[t] ~ icar_normal(N, node1, node2);
     // Priors on aspaial errors
     theta_lambda[t] ~ std_normal();

@@ -9,7 +9,7 @@
 #               destfile= "nb_data_funs.R")
 #-------------------------------------------------------------------------------
 
-setwd("~/Github/chagas_modeling")
+setwd("~/chagas_modeling")
 library(tidyverse)
 library(sf)
 library(rstan)
@@ -34,7 +34,7 @@ load("./from_ayesha/cleaned_data/pop_all.Rdata")
 
 # For testing purposes only:
 # The state with the highest count is:
-testing <- TRUE 
+testing <- FALSE  
 if (testing){
   chagas_arr %>% 
     group_by(uf) %>%
@@ -137,7 +137,7 @@ stan_data <- list(
 )
 
  
-Sys.setenv(STAN_OPENCL=TRUE)
+# Sys.setenv(STAN_OPENCL=FALSE)
 options("cmdstanr_verbose" = TRUE)
 # Need to run the following at least once to make sure STAN can use the 
 # graphics card
@@ -151,7 +151,7 @@ options("cmdstanr_verbose" = TRUE)
 
 chagas_offset <- cmdstan_model("05_chagas_offset_time.stan",
                                # force_recompile = TRUE,
-              cpp_options = list(stan_opencl = TRUE))
+              cpp_options = list(stan_opencl = FALSE))
 
 message("Sampling began at", Sys.time())
 chagas_sample <- chagas_offset$sample(data = stan_data, 
@@ -192,8 +192,7 @@ chagas_summary %>% filter(str_detect(variable, "psi"))
 mcmc_areas(chagas_sample$draws("beta0"))
 mcmc_areas(chagas_sample$draws("alpha0"))
 mcmc_areas(chagas_sample$draws("rho_pi"))
-mcmc_areas(chagas_sample$draws("rho_lambda"))
-mcmc_areas(chagas_sample$draws("sigma_delta"))
+# mcmc_areas(chagas_sample$draws("rho_lambda"))
 
 
 chagas_sample$save_object(file="mcmc_out/chagas_offset.RDS")
@@ -208,7 +207,7 @@ chagas_summary %>%
   ggplot() + geom_point(aes(x = t, y = median)) + geom_errorbar(aes(x = t,ymin = q5, ymax = q95))
 
 chagas_summary %>% 
-  filter(str_detect(variable, "^E_y\\[[0-9]*,193\\]")) %>%
+  filter(str_detect(variable, "^E_y\\[[0-9]*,190\\]")) %>%
   separate(variable, into=c("variable", "t", "muni", NA), sep = "\\[|,|\\]") %>%
   ggplot() + geom_point(aes(x = t, y = median)) + geom_errorbar(aes(x = t,ymin = q5, ymax = q95))
 
@@ -229,15 +228,22 @@ IR <- bind_cols(IR, count)
 IR <- bind_cols(br_shp, IR)
 
 IR <- IR %>% 
-  mutate(populacao = as.numeric(populacao)) %>%
-  mutate(across(c(year1, year2, year3, year4, year4, MLE_y1, MLE_y2, MLE_y3, MLE_y4, MLE_y5), ~./populacao))
+  mutate(populacao = as.numeric(populacao)) #%>%
+  # mutate(across(c(year1, year2, year3, year4, year4, MLE_y1, MLE_y2, MLE_y3, MLE_y4, MLE_y5), ~./populacao))
 
 
 tmap_arrange(
-  tm_shape(IR) + tm_polygons(col = "year5", style = "cont"),
-  tm_shape(IR) + tm_polygons(col = "MLE_y5", style = "cont")
+  tm_shape(IR) + tm_polygons(col = "year2", style = "cont"),
+  tm_shape(IR) + tm_polygons(col = "MLE_y2", style = "cont")
 )
 
+# Plot of IR and MLE
+ggplot(IR) +
+  geom_point(aes(x = year1, y = MLE_y1)) + 
+  geom_point(aes(x = year2, y = MLE_y2)) + 
+  geom_point(aes(x = year3, y = MLE_y3)) + 
+  geom_point(aes(x = year4, y = MLE_y4)) + 
+  geom_point(aes(x = year5, y = MLE_y5)) 
 
 
 
