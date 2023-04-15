@@ -3,24 +3,6 @@ functions {
     // Soft sum-to-zero constraint
     return -0.5 * dot_self(phi[node1] - phi[node2]) + normal_lpdf(sum(phi) | 0, 0.001*N);
  }
-  real ZIP_partial_lpmf(int[] y_slice, int start, int end, vector pi, vector lambda) {
-    int slice_size = size(y_slice) - 1;
-    real a; real b; real c;
-    real ret = 0;
-    
-    for (i in 1:slice_size) {
-      a = bernoulli_logit_lpmf(1 | pi[start+i]);
-      b = bernoulli_logit_lpmf(0 | pi[start+i]);
-      c = poisson_log_lpmf(y_slice[i] | lambda[start+i]);
-        
-      if (y_slice[i] == 0) {
-        ret += log_sum_exp(a, b+c);
-      } else {
-        ret += b + c;
-      }
-    }
-    return ret;
-  }
 }
 data {
   // Number of municipalities
@@ -39,16 +21,37 @@ data {
   int E[T,N];
   // Scaling factor-- scales variance of spatial effects
   real<lower=0> scaling_factor;
-  // Grainsize
-  int grainsize;
-  
 }
 transformed data {
   // Logged population
   vector[N] log_E[T];
+  // indices of zero counts
+  int zero_idx[T,N];
+  // Max number of zero counts
+  int zero_max[T];
+  // indices of nonzero counts
+  int nonzero_idx[T,N];
+  // max number of nonzero counts
+  int nonzero_max[T];
   
   for (t in 1:T) {
     log_E[t] = to_vector(log(E[t,1:N]));
+  }
+  
+  // Loop through the y data and tally zeros and nonzeros appropriately
+  for (t in 1:T) {
+    zero_max[t] = 0;
+    nonzero_max[t] = 0;
+    for (n in 1:N){
+      if (y[t,n] == 0) {
+        zero_max[t] += 1;
+        zero_idx[t, zero_max[t]] = n;
+      }
+      else {
+        nonzero_max[t] += 1;
+        nonzero_idx[t, nonzero_max[t]] = n;
+      }
+    }
   }
 }
 parameters {
@@ -74,16 +77,15 @@ transformed parameters{
   vector[N] pi[T];   // Bernoulli GLM term 
   vector[N] lambda[T];  // Poisson GLM term
   
-  /*(sqrt(1 - rho_lambda) * theta_lambda[t] + sqrt(rho_lambda/scaling_factor) * phi_lambda[t]);*/
   for (t in 1:T) {
     lambda[t] = log_E[t] + beta0[t] + u_lambda[t];
     pi[t] = alpha0[t] + sigma_pi[t] * (sqrt(1 - rho_pi[t]) * theta_pi[t] + sqrt(rho_pi[t]/scaling_factor) * phi_pi[t]);
   }
 }
 model {
-  real a;
-  real b;
-  real c;
+  
+  vector[N] pi_inv_logit; 
+  vector[N] lambda_exp;
   
   // AR Priors for intercepts
   // Year 1
@@ -105,23 +107,27 @@ model {
   }
   
   for (t in 1:T) {
-    // OLD: Regular Poisson
-    // y[t] ~ poisson_log(log_E[t] + lambda[t]);
     
-    // ZIP model:
-    target += reduce_sum(ZIP_partial_lpmf, y[t], grainsize, pi[t], lambda[t]);
-    // for (n in 1:N){
-    //   // ZIP
-    //   a = bernoulli_logit_lpmf(1 | pi[t,n]);
-    //   b = bernoulli_logit_lpmf(0 | pi[t,n]);
-    //   c = poisson_log_lpmf(y[t,n] | lambda[t,n]);
-    //     
-    //   if (y[t,n] == 0) {
-    //     target += log_sum_exp(a, b+c);
-    //   } else {
-    //     target += b + c;
-    //   }
-    // }
+    // Vectorized ZIP
+    pi_inv_logit = inv_logit(pi[t]);
+    lambda_exp = exp(lambda[t]);
+    
+    // Zeros
+    target += sum(log(
+           pi_inv_logit[zero_idx[t, 1:zero_max[t]]] + 
+        (1-pi_inv_logit[zero_idx[t, 1:zero_max[t]]]) .* 
+        exp(-lambda_exp[zero_idx[t, 1:zero_max[t]]])
+      ));
+    
+    // Nonzeros
+    target += bernoulli_lpmf(
+                rep_array(0, nonzero_max[t]) | 
+                pi_inv_logit[nonzero_idx[t,1:nonzero_max[t]]]
+          ) + poisson_lpmf(
+                y[t, nonzero_idx[t, 1:nonzero_max[t]]] | 
+                lambda_exp[nonzero_idx[t, 1:nonzero_max[t]]]
+          );
+      
   }
 }
 generated quantities {
