@@ -22,7 +22,8 @@ tmap_mode("view")
 # we recommend running this is a fresh R session or restarting your current session
 # install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
 library(cmdstanr)
-# install_cmdstan(cores = 4)
+install_cmdstan(cores = 4, version = "2.31.0")
+set_cmdstan_path("/Users/eroubenoff/.cmdstan/cmdstan-2.31.0")
 # set_cmdstan_path(path="G:/Documents/.cmdstan/cmdstan-2.31.0")
 
 source("nb_data_funs.R")
@@ -125,6 +126,28 @@ N_edges = nbs$N_edges;
 scaling_factor = scale_nb_components(br_nb)[1];
 
 
+## Tally zero and nonzeros
+n_T = nrow(chagas_offset_count)
+zero_max = array(rep(0,n_T))
+nonzero_max = array(rep(0,n_T))
+zero_idx = matrix(0, nrow = n_T, ncol = N)
+nonzero_idx = matrix(0, nrow = n_T, ncol = N)
+
+for (t in 1:n_T) {
+  zero_max[t] = 0;
+  nonzero_max[t] = 0;
+  for (n in 1:N){
+    if (chagas_offset_count[t,n] == 0) {
+      zero_max[t] = zero_max[t] +  1;
+      zero_idx[t, zero_max[t]] = n;
+    }
+    else {
+      nonzero_max[t] = nonzero_max[t] + 1;
+      nonzero_idx[t, nonzero_max[t]] = n;
+    }
+  }
+}
+
 stan_data <- list(
   N = N,
   T = nrow(chagas_offset_count),
@@ -134,7 +157,10 @@ stan_data <- list(
   y = chagas_offset_count, 
   E = chagas_pop, 
   scaling_factor = scaling_factor,
-  grainsize = 1
+  zero_idx = zero_idx,
+  zero_max = zero_max,
+  nonzero_idx = nonzero_idx,
+  nonzero_max = nonzero_max
 )
 
  
@@ -148,30 +174,76 @@ options("cmdstanr_verbose" = TRUE)
 #   paste0("LDFLAGS+= -L\"",path_to_opencl_lib,"\" -lOpenCL")
 # )
 # cmdstanr::cmdstan_make_local(cpp_options = cpp_options)
-# cmdstanr::rebuild_cmdstan()
+# cmdstanr::rebuild_cmdstan(cores=4)
 
-chagas_offset <- cmdstan_model("05_chagas_offset_time_vectorized.stan",
-                               force_recompile = TRUE,
-              cpp_options = list(stan_threads = FALSE, stan_opencl=TRUE))
+chagas_offset <- cmdstan_model(# "05_chagas_offset_time_vectorized.stan",
+                              "05_knorr_held.stan",
+                               force_recompile = FALSE,
+              cpp_options = list(stan_threads = FALSE, stan_opencl=FALSE))
 
 message("Sampling began at", Sys.time())
 chagas_sample <- chagas_offset$sample(data = stan_data, 
                       chains=ifelse(testing, 1, 4), 
-                      parallel_chains=ifelse(testing, 1, 2),
-                      # threads_per_chain = 2,
-                      iter_warmup=ifelse(testing, 500, 2000), 
-                      iter_sampling=ifelse(testing,500, 1000), 
+                      parallel_chains= 1,
+                      iter_warmup=ifelse(testing, 100, 1000), 
+                      iter_sampling=ifelse(testing,100, 1000), 
                       opencl_ids = c(0, 0),
                       output_dir = "mcmc_out",
+                      save_latent_dynamics = FALSE,
                       save_warmup=FALSE)
 
-# chagas_sample$profiles()
+chagas_sample$profiles()
 
 # chagas_sample$save_output_files("mcmc_out/")
-chagas_sample$save_object(file="mcmc_out/chagas_offset.RDS")
+chagas_sample$save_object(file="mcmc_out/knorr-held.RDS")
 
 
 message("Model began at ", start_time, " and ended at ", end_time,
         "\nTotal run time is: ", end_time - start_time)
 
+stop()
 
+chagas_summary <- chagas_sample$summary()
+warnings()
+chagas_summary
+
+# Some diagnostics
+# Rhat
+chagas_summary %>% arrange(-rhat) 
+# % under 1.1 and 1.01
+chagas_summary %>% summarize(rhat_below_1.01 = mean(rhat < 1.01),
+                             rhat_below_1.1 = mean(rhat < 1.1))
+chagas_summary %>% arrange(ess_bulk) 
+chagas_summary %>% ggplot() + geom_histogram(aes(rhat))
+
+#Parcoord
+color_scheme_set("darkgray")
+np_cp <- nuts_params(chagas_sample)
+# Extract draws as array
+posterior_cp <- as_draws_array(chagas_sample$draws())
+mcmc_parcoord(chagas_sample$draws("gamma_pi"), np = np_cp)
+mcmc_parcoord(chagas_sample$draws("alpha_pi"), np = np_cp)
+mcmc_trace(chagas_sample$draws("sigma_gamma_pi"), np = np_cp)
+mcmc_trace(chagas_sample$draws("mu_pi"))
+mcmc_trace(chagas_sample$draws("mu_lambda"))
+
+# mcmc_scatter
+# First check all the variance parameters
+mcmc_pairs(posterior_cp, pars = c("sigma_alpha_pi","sigma_phi_pi", "sigma_theta_pi", "sigma_delta_pi"), np=np_cp)
+mcmc_pairs(posterior_cp, pars = c("delta_pi[5,1]", "delta_pi[5,2]"), np=np_cp)
+mcmc_pairs(posterior_cp, pars = c("gamma_pi[1]", "gamma_pi[2]"), np=np_cp)
+
+
+# Check phi
+chagas_summary %>% filter(str_detect(variable, "phi")) %>% pull(median) %>% hist()
+
+chagas_summary %>% filter(str_detect(variable, "E_y"))  %>% arrange(-rhat)
+chagas_summary %>% filter(str_detect(variable, "sigma_delta"))
+
+chagas_summary %>% filter(str_detect(variable, "rho"))
+chagas_summary %>% filter(str_detect(variable, "alpha"))
+chagas_summary %>% filter(str_detect(variable, "delta_pi"))
+
+mcmc_trace(chagas_sample$draws("theta[5,14]"))
+
+plot(chagas_summary$rhat, chagas_summary$ess_bulk)
