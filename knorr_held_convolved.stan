@@ -3,12 +3,6 @@ functions {
     // Soft sum-to-zero constraint
     return -0.5 * dot_self(phi[node1] - phi[node2]) + normal_lpdf(sum(phi) | 0, 0.001*N);
  }
-  real knorr_held_type4_lpdf(vector delta_t, vector delta_tm1, int N, array[] int node1, array[] int node2) {
-    // Soft sum-to-zero constraint
-    return -0.5 * dot_self(delta_t[node1] - delta_t[node2] - delta_tm1[node1] + delta_tm1[node2]) + 
-               normal_lpdf(sum(delta_t) | 0, 0.001*N);
-    
- }
 }
 data {
   // Number of municipalities
@@ -63,9 +57,9 @@ parameters {
   real<lower=0, upper=1> rho;
   real<lower=1e-10, upper=10> sigma_convolved;
   
-  // Knorr-Held Type 4 spatio-temporal interaction
+  // Knorr-Held Type I spatio-temporal interaction
   array[T] vector[N] delta_pi;
-  real<lower=1e-10, upper=10> sigma_delta_pi; 
+  real<lower=1e-10, upper=10> sigma_delta_pi;
   
   // Poisson part: global mean and s-t random effect
   // Intercepts
@@ -81,36 +75,24 @@ transformed parameters{
   array[T] vector[N] pi;   // Bernoulli GLM term 
   array[T] vector[N] lambda;  // Poisson GLM term
   
-  profile("transformed_params"){
   for (t in 1:T) {
-    pi[t] = mu_pi + 
-            sigma_alpha_pi * alpha_pi[t] + 
-            sigma_convolved * ( 
-            sqrt(rho/scaling_factor) * phi_pi + sqrt(1-rho)*theta_pi 
-            ) + 
-            sigma_delta_pi * delta_pi[t];
-    pi[t] = inv_logit(pi[t]);
-    lambda[t] = mu_lambda + sigma_u*u[t];
-    lambda[t] = exp(log_E[t] + lambda[t]);
-  }
+    pi[t] = inv_logit(mu_pi + 
+            alpha_pi[t] +
+            sigma_convolved * (
+              sqrt(rho/scaling_factor) * phi_pi + sqrt(1-rho)*theta_pi
+            ) +
+            sigma_delta_pi * delta_pi[t]);
+    lambda[t] = exp(log_E[t] + mu_lambda + sigma_u*u[t]);
   }
 }
 model {  
-  // Inverse terms
-  vector[N] pi_inv_logit; 
-  vector[N] lambda_exp;
-  
   // Intercepts
-  profile("mu"){
   mu_pi ~ normal(-10, 10);
   mu_lambda ~ normal(-5, 10);
-  }
   
   // Structured temporal trend
-  // alpha_pi ~ normal(0, 1);
   alpha_pi[1] ~ normal(0, sigma_alpha_pi);
   alpha_pi[2:T] ~ normal(alpha_pi[1:(T-1)], sigma_alpha_pi);
-  // // alpha_pi[2:T] ~ normal(0, sigma_alpha_pi);
   sigma_alpha_pi ~ gamma(2, 1);
   
   // Structured spatial patten
@@ -121,38 +103,34 @@ model {
   
   // Prior on Rho
   rho ~ uniform(0,1);
-  sigma ~ gamma(2,1);
+  
+  // Convolved variance
+  sigma_convolved ~ gamma(2,1);
   
   for (t in 1:T){
     // Lambda: Unstructured heterogeneity
-    profile("u"){
     u[t] ~ std_normal();
-    }
     
-    // Interaction error Type 4
-    // if (t == 1) {
-    //   delta_pi[1] ~  icar_normal(N, node1, node2);
-    // }
-    if (t >= 2) {
-      delta_pi[t] ~ knorr_held_type4(delta_pi[t-1], N, node1, node2);
-    }
+    // Interaction
+    delta_pi[t] ~ std_normal();
+    
   }
   sigma_delta_pi ~ gamma(2, 1);
   sigma_u ~ gamma(2, 1);
+  
   
   
   // Likelihood
   for (t in 1:T) {
     
     // Vectorized ZIP
-    
     // Zeros
     if (zero_max[t] > 0) {
-      target += sum(log(
+      target += log(
              pi[t, zero_idx[t, 1:zero_max[t]]] +
           (1 - pi[t, zero_idx[t, 1:zero_max[t]]]) .*
           exp(-lambda[t, zero_idx[t, 1:zero_max[t]]])
-        ));
+        );
     }
     
     // Nonzeros
@@ -167,12 +145,4 @@ model {
             );
     }
   }
-}
-generated quantities {
-  array[T] vector[N] E_y; // Expected count 
-  
-  for (t in 1:T) {
-    E_y[t] = (1-inv_logit( pi[t])) .* exp(log_E[t] + lambda[t]);
-  }
-  
 }

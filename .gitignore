@@ -1,7 +1,10 @@
 .Rproj.user
 .Rhistory
 
-.Rdata
+*.Rdata
+*.RData
+*.RDS
+*.rds
 .Ruserdata
 ./mcmc_out/*
 ./chagas_data/from_tabnet/*
