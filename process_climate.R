@@ -134,11 +134,11 @@ climate_df <- climate_df %>%
 #     reducer: ee.Reducer.mean() //, // use mode to find the majority land cover per region (polygon)
 #     // scale:100  // target pixel size
 #   });
-#   
+# 
 # });
 # 
 # // print(majority_value_per_poly.flatten());
-# // Export 
+# // Export
 # Export.table.toDrive({
 #   collection: majority_value_per_poly.flatten(),  // <----- flatten()
 #   description: 'br_ndvi',

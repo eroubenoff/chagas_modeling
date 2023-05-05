@@ -17,3 +17,6 @@ chagas_data.Rdata
 mcmc_out/
 climate_data/
 br_ndvi.csv
+unused/
+br_2010_census_por_municipios/
+*.csv
