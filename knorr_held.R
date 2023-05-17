@@ -24,15 +24,14 @@ library(cmdstanr)
 # install_cmdstan(cores = 4, version = "2.31.0")
 set_cmdstan_path("/Users/eroubenoff/.cmdstan/cmdstan-2.31.0")
 
-source("nb_data_funs.R")
 source("chagas_helper.R")
 
 load("chagas_data.Rdata")
-load("./from_ayesha/cleaned_data/pop_all.Rdata")
+
 options("cmdstanr_verbose" = TRUE)
 
-testing <- FALSE
-stan_data <- create_stan_data(chagas_arr, br_shp, testing = testing)
+testing <- TRUE 
+stan_data <- create_stan_data(chagas_arr, pop_arr, br_shp, testing = testing, covariate = FALSE)
 chagas_offset <- cmdstan_model("knorr_held_convolved_both_parts.stan",
                                force_recompile = FALSE)
 

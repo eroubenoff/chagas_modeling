@@ -35,8 +35,10 @@ setwd("~/chagas_modeling")
 #-------------------------------------------------------------------------------
 # br_shp <- st_read("./from_ayesha/municipios_2010.shp", "municipios_2010")
 br_shp <- geobr::read_municipality(year = 2015)
-# br_shp <- br_shp %>%
-#   mutate(muni_code = as.numeric(substr(codigo_ibg, 1, 6)))
+br_shp <- st_transform(br_shp, 4326)
+# Drop 2 islands
+to_drop <- c(1526, 3500)
+br_shp <- br_shp[-to_drop, ]
 
 
 ## Load population
@@ -201,6 +203,26 @@ sum(pop_arr)
 all(dimnames(chagas_arr)[[1]] == dimnames(pop_arr)[[1]])
 all(dimnames(chagas_arr)[[2]] == dimnames(pop_arr)[[2]])
 
+
+#-------------------------------------------------------------------------------
+## Read in covariates 
+#-------------------------------------------------------------------------------
+
+covariate_df <- readRDS("bioclimate.RDS")
+
+covariate_arr <- covariate_df %>% 
+  mutate(year = lubridate::year(date)) %>% 
+  filter(year >= 2001) %>% 
+  filter(muni_code %in% pull(br,muni_code)) %>% 
+  select(muni_code, year, contains("PC"))  %>%
+  pivot_longer(-c(muni_code, year)) %>% 
+  acast(year ~ muni_code ~ name)
+
+all(dimnames(chagas_arr)[[1]] == dimnames(covariate_arr)[[1]][1:19])
+all(dimnames(chagas_arr)[[2]] == dimnames(covariate_arr)[[2]])
+covariate_arr <- covariate_arr[,,paste0("PC", 1:19)]
+all(dimnames(covariate_arr)[[3]] == paste0("PC", 1:19))
+
 #-------------------------------------------------------------------------------
 #### Write out object ####
 #-------------------------------------------------------------------------------
@@ -211,6 +233,7 @@ save(
   chagas_arr,
   pop_arr,
   br_shp,
+  covariate_arr,
   file = "chagas_data.Rdata"
 )
 

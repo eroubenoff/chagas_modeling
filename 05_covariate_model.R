@@ -15,26 +15,31 @@ library(cmdstanr)
 # install_cmdstan(cores = 4, version = "2.31.0")
 set_cmdstan_path("/Users/eroubenoff/.cmdstan/cmdstan-2.31.0")
 
-source("nb_data_funs.R")
-source("chagas_helper.R")
+
 
 load("chagas_data.Rdata")
-load("./from_ayesha/cleaned_data/pop_all.Rdata")
 options("cmdstanr_verbose" = TRUE)
 
-testing <- FALSE
-stan_data <- create_stan_data(chagas_arr, br_shp, testing = testing)
-chagas_offset <- cmdstan_model("chagas_offset_time_vectorized.stan",
+source("03_chagas_helper.R")
+testing <- FALSE 
+stan_data <- create_stan_data(chagas_arr = chagas_arr, pop_arr = pop_arr, br_shp = br_shp, testing = testing, covariate_arr=covariate_arr, nvar= 6)
+chagas_offset <- cmdstan_model("knorr_held_covariate.stan",
                                force_recompile = FALSE)
 
 message("Sampling began at", Sys.time())
 chagas_sample <- chagas_offset$sample(data = stan_data,
-                                      chains=ifelse(testing, 2, 4),
+                                      chains=ifelse(testing, 4, 4),
                                       parallel_chains=4,
                                       iter_warmup=ifelse(testing, 500, 2000),
-                                      iter_sampling=ifelse(testing,100, 1000),
+                                      iter_sampling=ifelse(testing,100, 500),
                                       output_dir = "mcmc_out",
                                       save_latent_dynamics = TRUE,
                                       adapt_delta = 0.8,
                                       refresh=25,
                                       save_warmup=FALSE)
+
+# chagas_summmary <- chagas_sample$summary()
+# chagas_summmary
+
+# 
+# chagas_summmary %>% filter(str_detect(variable, "beta"))

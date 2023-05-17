@@ -79,6 +79,9 @@ parameters {
   vector[nvar] beta_pi;
   vector[nvar] beta_lambda;
   
+  array[nvar] real<lower=1e-10, upper=10> sigma_beta_pi;
+  array[nvar] real<lower=1e-10, upper=10> sigma_beta_lambda;
+  
   
 }
 transformed parameters{
@@ -145,8 +148,10 @@ model {
   sigma_delta_lambda ~ gamma(2, 1);
   
   // Coefficients
-  beta_pi ~ std_normal();
-  beta_lambda ~ std_normal();
+  beta_pi ~ normal(0, sigma_beta_pi);
+  beta_lambda ~ normal(0, sigma_beta_pi);
+  sigma_beta_pi ~ gamma(2,1);
+  sigma_beta_lambda ~ gamma(2,1);
   
   
   

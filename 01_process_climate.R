@@ -185,3 +185,80 @@ climate_df <- climate_df %>%
             )
 
 
+
+
+
+# Using new data, 19 bioclimate variables: 
+path <- "climate_data/Global Bioclimatic Indicators from 1950-2100 Derived from Climate Projections"
+files <- list.files(path, full.names = TRUE)
+
+bioclimate <- map(files, ~process_climate(., br_shp))
+
+bioclimate <-  bioclimate %>% imap(\(x, idx) pivot_longer(x, -muni_code, names_to = "date") %>%  rename(!!glue::glue("var_{idx}") := value )) 
+  
+bioclimate <- bioclimate %>% reduce(full_join, by=c('muni_code', 'date')) 
+
+# Filter date range
+bioclimate <- bioclimate %>% 
+  mutate(date = lubridate::as_date(date)) %>% 
+  filter(date >= lubridate::as_date("2000-01-01"), date <= lubridate::as_date("2030-01-01"))
+
+
+# Assemble matrix for PCA
+bioclimate_mat <- as.matrix(select(bioclimate, -1, -2))
+colnames(bioclimate_mat) <-c(
+  "Annual_Mean_Temperature",
+  "Mean_Diurnal_Range",
+  "Isothermality",
+  "Temperature_Seasonality",
+  "Max_Temperature_of_Warmest_Month",
+  "Min_Temperature_of_Coldest_Month",
+  "Temperature_Annual_Range",
+  "Mean_Temperature_of_Wettest_Quarter",
+  "Mean_Temperature_of_Driest_Quarter",
+  "Mean_Temperature_of_Warmest_Quarter",
+  "Mean_Temperature_of_Coldest_Quarter",
+  "Annual_Precipitation",
+  "Precipitation_of_Wettest_Month",
+  "Precipitation_of_Driest_Month",
+  "Precipitation_Seasonality",
+  "Precipitation_of_Wettest_Quarter",
+  "Precipitation_of_Driest_Quarter",
+  "Precipitation_of_Warmest_Quarter",
+  "Precipitation_of_Coldest_Quarter")
+
+bioclimate_pc <- prcomp(bioclimate_mat, scale. = TRUE)
+
+pc_mat <- round(-bioclimate_pc$rotation[,1:6], 3)
+rownames(pc_mat) <- rownames(pc_mat) %>% str_replace_all("_", " ")
+stargazer::stargazer(pc_mat, summary = FALSE, align=TRUE)
+
+summary(bioclimate_pc)$importance
+
+summary(bioclimate_pc)$importance %>% as.data.frame() %>%
+  rownames_to_column("var") %>%
+  pivot_longer(-var) %>% 
+  mutate(pc= as.numeric(str_sub(name, 3,4))) %>%
+  filter(var != "Standard deviation") %>%
+  ggplot(aes(x = pc, y = 100*value, color = var)) + 
+  geom_point() +
+  geom_line() +
+  geom_hline(aes(yintercept = 95), linetype = "dotted") +
+  geom_text(aes( 0, 95, label = "95%", vjust = -1), size = 3, color = "black")+
+  ggtitle("Screeplot: Principal Components of 19 Bioclimatic Variables") + 
+  theme(legend.title = "") + 
+  xlab("Principal Component") + 
+  ylab("%") +
+  cowplot::theme_cowplot()
+
+# biplot(bioclimate_pc)
+
+bioclimate_pc$scale
+
+
+bioclimate <- bind_cols(bioclimate, bioclimate_pc$x)
+
+saveRDS(bioclimate, "bioclimate.RDS")
+saveRDS(bioclimate_pc, "bioclimate_pc.RDS")
+
+
