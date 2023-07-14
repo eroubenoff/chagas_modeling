@@ -237,130 +237,91 @@ save(
   file = "chagas_data.Rdata"
 )
 
+state_code <- br_pop %>% select(contains("state")) %>% st_drop_geometry() %>% group_by(code_state, abbrev_state) %>% summarize() %>% arrange(code_state)
+
+## Create a plot of the climate variables
+cowplot::plot_grid(
+    
+  covariate_df %>% 
+    group_by(date) %>%
+    mutate(code_state = str_sub(as.character(muni_code), 1, 2)) %>% 
+    left_join(state_code) %>% 
+    filter(abbrev_state %in% c("PA", "AP")) %>% 
+    group_by(date, abbrev_state) %>%
+    summarize(across(starts_with("var"), mean)) %>%
+    ggplot(aes(date, var_1, color= abbrev_state)) + geom_line() +
+    cowplot::theme_cowplot() +
+    xlab("Year") + ylab("") + 
+    theme(legend.title = element_blank()) + 
+    ggtitle("Mean Annual Temperature"),
+   
+  covariate_df %>% 
+    group_by(date) %>%
+    mutate(code_state = str_sub(as.character(muni_code), 1, 2)) %>% 
+    left_join(state_code) %>% 
+    filter(abbrev_state %in% c("PA", "AP")) %>% 
+    group_by(date, abbrev_state) %>%
+    summarize(across(starts_with("var"), mean)) %>%
+    ggplot(aes(date, var_12*3600*24*365*1000 , color= abbrev_state)) + geom_line() +
+    cowplot::theme_cowplot() + 
+    xlab("Year") + ylab("") + 
+    theme(legend.title = element_blank()) + 
+    ggtitle("Annual Precipitation (mm)"),
+  
+  ncol = 1
+) %>% 
+  ggsave("APPA_climate.png",., width = 7, height = 5, scale = 1.2)
+
+
+# Cases against temperature
+covariate_df <- br %>% 
+  st_drop_geometry() %>% 
+  pivot_longer(c(starts_with("pop_"), starts_with("chagas_")),
+               names_sep = "_", names_to = c("var", "year"))  %>%
+  pivot_wider(names_from = var, values_from = value) %>% 
+  left_join(
+    covariate_df %>% mutate(year = as.character(lubridate::year(date))),
+    by = c("muni_code", "year")
+  )
+  
+covariate_df
+
+cowplot::plot_grid(
+  covariate_df %>% 
+    ggplot(aes(y = chagas, x = var_1-273)) +
+    geom_jitter(show.legend = FALSE) + 
+    ylab("ACD Counts") +
+    xlab("Annual Mean Temperature (°C)") +
+    cowplot::theme_cowplot() +
+    labs(title = "Temperature and Acute Chagas Disease (ACD)",
+         subtitle = "For Single Municipality/Year, Brazil, 2001-2019"),
+  covariate_df %>% 
+    ggplot(aes(y = chagas, x = var_12*3600*24*365*1000 )) +
+    geom_jitter(show.legend = FALSE) + 
+    ylab("ACD Counts") +
+    xlab("Annual Precipitation (mm)") +
+    cowplot::theme_cowplot() +
+    labs(title = "Precipitation and Acute Chagas Disease (ACD)",
+         subtitle = "For Single Municipality/Year, Brazil, 2001-2019"),
+  ncol = 1
+) %>% ggsave("temp_humid_count.png", ., width = 7, height = 5, scale = 1.5)
+
+br_pop %>%
+  select(-name) %>% 
+  st_drop_geometry() %>%
+  pivot_longer(contains("pop_"), names_to = "year") %>%
+
+
+cov_plot_df <- left_join(covariate_df, br_pop, by = c("muni_code")) %>%
+  left_join(chagas_municipio, by = c("muni_code"))
+colnames(cov_plot_df)
+cov_plot_df$pop_2001
+sum(cov_plot_df$chagas_2001, na.rm=TRUE)
+
+cov_plot_df
+
 rm(list=ls())
 load("chagas_data.Rdata")
-
-
-# The remainder of this script is OBSOLETE.
-stop("Script executed correctly but the remainder of this script is OBSOLETE")
-
-#-------------------------------------------------------------------------------
-#### Rectangularize the Chagas data ####
-#-------------------------------------------------------------------------------
-# Pivot and extract muni code
-chagas_municipio <- chagas_municipio %>%
-  pivot_longer(cols = 2:14, names_to = "month", values_to = "count") %>%
-  mutate(muni_code = str_sub(`Município de residência`, 1, 6),
-         muni_code = as.numeric(muni_code))
-
-# Create df
-chagas_arr <- expand_grid(
-  municipio = unique(br_shp$muni_code),
-  year = unique(chagas_municipio$year),
-  month = unique(chagas_municipio$month)
-)
-
-# Join df with data
-chagas_arr <- left_join(chagas_arr,
-                        chagas_municipio %>% select(
-                          municipio = muni_code,
-                          year, month, count),
-)
-
-# Add in UF 
-chagas_arr <- left_join(chagas_arr,
-                        br_shp %>%
-                          st_drop_geometry() %>%
-                          select(municipio = muni_code, uf))
-
-# Set NAs to 0
-chagas_arr[is.na(chagas_arr)] <- 0
-
-# Lookup indices for municipios and UFs
-chagas_arr <- left_join(
-  chagas_arr,
-  chagas_arr %>% 
-    select(uf, municipio) %>%
-    distinct() %>%
-    arrange(uf, municipio) %>%
-    group_by(uf) %>%
-    mutate(uf_no = cur_group_id(),
-           muni_no = 1:n())
-) 
-
-
-
-# Cast to array
-# Need to order the month column like: factor(ColumnName, levels = unique(ColumnName)
-chagas_count <- acast(chagas_arr, formula = 
-                        uf_no~muni_no~year~factor(month, levels = unique(month)), 
-                      value.var = "count",
-                      fill = 0)
-# dim(chagas_count)
-# dimnames(chagas_count)
-
-# Vector of the number of municipalities within each UF
-N <- chagas_arr %>%
-  select(uf_no, muni_no) %>%
-  distinct() %>%
-  group_by(uf_no) %>%
-  slice_max(muni_no, n = 1) %>%
-  pull(muni_no)
-
-
-
-
-
-#-------------------------------------------------------------------------------
-#### Rectangularize the Pop data ####
-#-------------------------------------------------------------------------------
-# Create pop df
-chagas_pop <- chagas_arr %>%
-  select(municipio, year, uf_no, muni_no) %>%
-  distinct()
-
-# Join df with data
-chagas_pop <- chagas_pop %>%
-  left_join(pop.all %>% select(municipio = code, year, ps))
-
-# Cast matrix
-chagas_pop <- acast(chagas_pop, formula = uf_no~muni_no~year, value.var = "ps", fill = 0)
-# dim(chagas_pop)
-# dimnames(chagas_pop)
-
-# The population data only go through 2015 so for now we need to limit
-# the incidence data to 2015 (NTS: get the rest of the pop data)
-chagas_count <- chagas_count[, , 0:15, 1:12]
-chagas_pop <- chagas_pop[, ,1:15] 
-
-# See which data are missing by lining up the pop and the count data
-if (FALSE) {
-  for (u in 1:dim(chagas_pop)[1]) {
-    message(u, "\n")
-    for (m in 1:dim(chagas_pop)[2]) {
-      for (y in 1:dim(chagas_pop)[3]) {
-        if (is.na(chagas_pop[u, m, y]) & all(is.na(chagas_count[u, m, y, ]))){
-          next
-        }
-        if (!is.na(chagas_pop[u, m, y]) & all(!is.na(chagas_count[u, m, y, ]))){
-          next
-        }
-        else {
-          message("Mismatch at: UF ", u, ", M ", m, ", Y ", y, "missmatch \n")
-        }
-      }
-    }
-  }
-}
-
-# There are a few missing populations
-chagas_pop[12, 35, c(1,2,3)] <- rep(chagas_pop[12, 35, 4], 3)
-chagas_pop[13, 51, c(1,2,3)] <- rep(chagas_pop[13, 51, 4], 3)
-chagas_pop[13, 52, c(1,2,3)] <- rep(chagas_pop[13, 52, 4], 3)
-chagas_pop[17, 14, c(1,2,3)] <- rep(chagas_pop[17, 14, 4], 3)
-
-
-
 
 
 

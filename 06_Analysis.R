@@ -35,12 +35,12 @@ if (FALSE) {
   # Map of crude case counts
   counts_map <- bind_cols(br_shp, count = chagas_arr %>% colSums() %>% na_if(0)) %>% 
     tm_shape() + 
-    tm_fill(col = "count", style= "cont")  +
+    tm_fill(col = "count", style= "cont", textNA="No Reported Cases")  +
     tm_layout(aes.palette = list(seq = "-RdYlGn"))  +
     tm_shape(ufs) +
     tm_borders(col="black") + 
     tm_text("abbrev_state", size = 0.5, col = "black") +
-    tm_layout(main.title= 'Cumulative Cases between 2001 and 2009', 
+    tm_layout(main.title= 'Cumulative Cases between 2001 and 2019', 
               main.title.size = 1)
   
   tmap_save(counts_map, "counts_map.png", height = 5, width = 5)
@@ -381,7 +381,7 @@ process_mcmc <- function(fname, out_prefix, other_vars = c(), load = TRUE, draws
 
 
 
-load <- FALSE 
+load <-TRUE 
 
 fname <- "mcmc_out/knorr_held_convolved_both_parts-202305111148-X-64af77.csv"
 
@@ -463,6 +463,19 @@ municipality_IR <- E_y %>%
   summarize(IR = sum(median)/sum(pop))
 
 municipality_IR
+(br_shp %>% 
+  select(codigo_ibg, name_muni, code_state, abbrev_state, muni_code) %>% 
+  left_join(municipality_IR) %>% 
+  mutate(log_IR = log(IR)) %>% 
+  tm_shape()  +
+  tm_fill(col = "log_IR", style = "cont") +
+  tm_shape(ufs) +
+  tm_borders() +
+  tm_text("abbrev_state", size = 1, col = "black") +
+  tm_layout(aes.palette = list(seq = "-RdYlGn")))  %>%
+  tmap_save("muni_IR_map.png")
+
+
 
 UF_IR <- E_y %>%
   group_by(uf) %>%
@@ -832,14 +845,48 @@ beta_original <- bind_cols(
   name = rownames(bioclimate_pc$rotation) 
 )  
 
-
-beta_original_plot <- ggplot(beta_original %>% pivot_longer(-name, names_to = "var")) + geom_tile(aes(x = var, y = name, fill = value)) + 
+a <- ggplot(
+  beta_original %>%
+    pivot_longer(-name, names_to = "var") %>%
+    filter(str_detect(var, "lambda"))) +
+  geom_tile(aes(x = var, y = name, fill = value)) + 
+  # facet_wrap(~var) +
   viridis::scale_fill_viridis() +
   cowplot::theme_cowplot() + 
-  ylab("") + xlab("Process") +
-  ggtitle("Transformed Coefficients for\n19 Bioclimatic Variables")
+  ylab("") + xlab("") +
+  theme(axis.text.y = element_text(angle = 0, vjust = 0.5, hjust=1, size = 10),
+        axis.text.x = element_blank(),
+        plot.title = element_text(hjust = -1),
+        legend.position = "right")+
+  xlab("Rate of ACD Given Exposure")
 
-ggsave("beta_original_plot.png", beta_original_plot, height = 7, width = 8)
+a
+b <-   ggplot(
+  beta_original %>%
+    pivot_longer(-name, names_to = "var") %>%
+    filter(str_detect(var, "pi"))) +
+  geom_tile(aes(x = var, y = name, fill = value)) + 
+  # facet_wrap(~var) +
+  viridis::scale_fill_viridis() +
+  cowplot::theme_cowplot() + 
+  ylab("") + xlab("") +
+  theme(axis.text.y = element_text(angle = 0, vjust = 0.5, hjust=1, size = 10),
+        axis.text.x = element_blank(),
+        plot.title = element_text(hjust = -1),
+        legend.position = "right")+
+  xlab("Prob. Never Exposed")
+
+
+
+beta_original_plot <- cowplot::plot_grid(
+  a ,
+  b ,
+  ncol=2
+  )
+
+beta_original_plot
+
+ggsave("beta_original_plot.png", beta_original_plot, height = 7, width = 10)
 
 
 ## Parameter differences from main model
